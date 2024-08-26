@@ -15,20 +15,8 @@ export const registerDynamicRoutes = (fastify: FastifyInstance) => {
         }
 
         const routeName = path.basename(file, '.json');
-        const routePath = `/${routeName}`;
         const dataFilePath = path.join(dataDir, file);
-
-        const routeConfig: RouteConfig = config.routeConfig[file] || {
-            routes: ['GET'],
-            parents: [],
-            customParentKeys: {},
-            hasSpecificRoute: false
-        };
-
-        if (!routeConfig) {
-            console.error(`No routeConfig found for ${file}`);
-            return;
-        }
+        const routeConfig = getRouteConfig(file);
 
         if (routeConfig.parents.length > 0) {
             const nestedRoutePath = generateNestedRoutePath(routeConfig.parents, routeName, routeConfig.customParentKeys);
@@ -36,11 +24,20 @@ export const registerDynamicRoutes = (fastify: FastifyInstance) => {
                 registerNestedRoutes(fastify, routeConfig, nestedRoutePath, dataFilePath);
             }
         } else {
+            const routePath = `/${routeName}`;
             if (!isRouteRegistered(fastify, routePath)) {
                 registerRoutes(fastify, routeConfig.routes, routePath, dataFilePath, routeConfig);
             }
         }
     });
+};
+
+const getRouteConfig = (file: string): RouteConfig => {
+    const routeConfig = config.routeConfig[file];
+    if (!routeConfig) {
+        throw new Error(`No routeConfig found for ${file}`);
+    }
+    return routeConfig;
 };
 
 const isRouteRegistered = (fastify: FastifyInstance, routePath: string): boolean => {
