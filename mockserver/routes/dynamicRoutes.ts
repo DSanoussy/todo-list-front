@@ -1,12 +1,12 @@
 import {FastifyInstance} from 'fastify';
 import fs from 'fs';
 import path from 'path';
-import config from '../config/mockserver.config';
-import {RouteConfig} from "../config/types/interfaces";
+import {MockServerConfig, RouteConfig} from "../config/types/interfaces";
 import {partition} from "../utils/partition";
 import {generateSwaggerSchema} from "../utils/swagger-schema";
+import {DynamicRouteOptions} from "../config/types/interfaces";
 
-export const registerDynamicRoutes = (fastify: FastifyInstance) => {
+export const registerDynamicRoutes = (fastify: FastifyInstance, config: MockServerConfig, options: DynamicRouteOptions) => {
     const dataDir = path.join(__dirname, config.dataDir);
     const routeConfigs = Object.entries(config.routeConfig).map(([file, routeConfig]) => ({
         file,
@@ -22,7 +22,7 @@ export const registerDynamicRoutes = (fastify: FastifyInstance) => {
         const routePath = `/${routeName}`;
         if (!isRouteRegistered(fastify, routePath)) {
             const dataFilePath = path.join(dataDir, file);
-            registerRoutes(fastify, routeConfig.routes, routePath, dataFilePath, routeConfig);
+            registerRoutes(fastify, routeConfig.routes, routePath, dataFilePath, routeConfig, options);
         }
     });
 
@@ -32,7 +32,7 @@ export const registerDynamicRoutes = (fastify: FastifyInstance) => {
         const nestedRoutePath = generateNestedRoutePath(routeConfig.parents, routeName, routeConfig.customParentKeys);
         const dataFilePath = path.join(dataDir, file);
         if (!isRouteRegistered(fastify, nestedRoutePath)) {
-            registerRoutes(fastify, routeConfig.routes, nestedRoutePath, dataFilePath, routeConfig);
+            registerRoutes(fastify, routeConfig.routes, nestedRoutePath, dataFilePath, routeConfig, options);
         }
     });
 
@@ -48,11 +48,24 @@ const isRouteRegistered = (fastify: FastifyInstance, routePath: string): boolean
 };
 
 const generateNestedRoutePath = (parents: string[], routeName: string, customParentKeys: { [key: string]: string }): string => {
-    const parentPaths = parents.map(parent => `${parent}/:${customParentKeys[parent] || `${parent}Id`}`).join('/');
+    /*const parentPaths = parents.map(parent => `${parent}/:${customParentKeys[parent] || `${parent}Id`}`).join('/');
+    return `/${parentPaths}/${routeName}`;*/
+
+    const parentPaths = parents.map(parent => {
+        const key = customParentKeys[parent];
+        if (key === 'static') {
+            // Use the parent segment as-is without appending a dynamic key
+            return parent;
+        } else {
+            // Append a dynamic key if specified, or use a default key if not
+            return `${parent}/:${key || `${parent}Id`}`;
+        }
+    }).join('/');
+
     return `/${parentPaths}/${routeName}`;
 };
 
-const registerRoutes = (fastify: FastifyInstance, routes: string[], routePath: string, dataFilePath: string, config: RouteConfig) => {
+const registerRoutes = (fastify: FastifyInstance, routes: string[], routePath: string, dataFilePath: string, config: RouteConfig, options: DynamicRouteOptions  ) => {
     routes.forEach(route => {
         const { general: generalSchema, specific: specificSchema } = generateSwaggerSchema(route, routePath, path.parse(dataFilePath).name, config.hasSpecificRoute);
 
@@ -87,7 +100,8 @@ const registerRoutes = (fastify: FastifyInstance, routes: string[], routePath: s
                         if (simulateError(request, reply)) return;
                         const data = readDataFromFile(dataFilePath);
                         // @ts-ignore
-                        const item = findItemById(data, request.params, config);
+                        const item = findItemById(data, request.params, config, options.verifyIds);
+                        console.log('item : ', item);
                         reply.status(item ? 200 : 404).send(item || { error: 'Item not found' });
                     });
                     fastify.log.info(`Registered GET route: ${specificPath}`);
@@ -201,8 +215,13 @@ const filterDataByQueryParams = (data: any[], queryParams: any) => {
     });
 };
 
-const findItemById = (data: any[], params: { [key: string]: string }, config: RouteConfig) => {
+const findItemById = (data: any[], params: { [key: string]: string }, config: RouteConfig, verifyIds: boolean) => {
     let filteredData = data;
+
+    if (!verifyIds) {
+        console.log('Skipping ID verification for filtered data : ', filteredData);
+        return filteredData;
+    }
 
     // Filter based on parent IDs if the route has parents
     if (config.parents && config.parents.length > 0) {

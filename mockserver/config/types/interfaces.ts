@@ -6,8 +6,13 @@ export interface RouteConfig {
 }
 
 export interface MockServerConfig {
+    basePath: string;
     dataDir: string;
     routeConfig: {
         [key: string]: RouteConfig;
     };
+}
+
+export interface DynamicRouteOptions {
+    verifyIds: boolean;
 }
